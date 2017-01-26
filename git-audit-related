@@ -1,0 +1,87 @@
+#! /bin/sh
+
+die()
+{
+	echo "$@" >&2
+	exit -1
+}
+
+debug()
+{
+	echo "$@" >&2
+}
+
+grep_related()
+{
+	awk '
+		/^Related: [a-f0-9]+/ {print $2}
+	'
+}
+
+resolve_by_tree_in_reflog()
+{
+	tree="$1"
+	omit0="$2"
+	omit1="$3"
+
+	git reflog --pretty="format:%H %T" \
+	| awk -v tree=${tree} -v omit0=${omit0} -v omit1=${omit1} '
+	/^[0-9a-f]{40} [0-9a-f]{40}$/ {
+		if ($1 == omit0 || $1 == omit1)
+			next
+		if ($2 == tree) {
+			print $1
+			exit
+		}
+	}
+	'
+}
+
+resolve_related()
+{
+	start="$1"
+	id="$2"
+	related="$3"
+	original="$3"
+
+	for i in `seq 100`; do
+		for one in `git rev-list ^${start} ${id}`; do
+			if [ "$one" = "${related}" ]; then
+				echo ${related}
+				debug "resolved ${original} as ${one}"
+				return
+			fi
+		done
+
+		tree=`git cat-file commit ${related} | awk '/^tree/ {print $2; exit}'`
+		debug "resolve ${related} (${tree}) via reflog"
+		related=`resolve_by_tree_in_reflog "${tree}" "${related}" "${id}"`
+
+		if [ -z "${related}" ]; then
+			break
+		fi
+	done
+
+	debug "failed to resolve ${original}"
+	echo "${original}"
+}
+
+if [ -z "$1" ]; then
+	die "missing argument <start-of-audit>"
+fi
+
+start=`git rev-parse "$1"`
+shift
+
+while [ -n "$1" ]; do
+	id=`git rev-parse "$1"`
+
+	echo "commit ${id}"
+	git cat-file commit ${id} | grep_related \
+	| (while read line; do
+		related=`git rev-parse ${line}`
+		resolve_related ${start} ${id} ${related}
+	done)
+
+	shift
+done
