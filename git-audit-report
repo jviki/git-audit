@@ -1,0 +1,155 @@
+#! /bin/sh
+
+die()
+{
+	echo "$@" >&2
+	exit -1
+}
+
+debug()
+{
+	if [ "${GIT_AUDIT_REPORT_DEBUG}" -gt "0" ]; then
+		echo "$@" >&2
+	fi
+}
+
+script_path()
+{
+	if [ "${GIT_AUDIT_REPORT_DEBUG}" -gt "1" ]; then
+		dirname $0
+	else
+		echo "/usr/share/git-audit"
+	fi
+}
+
+bin_path()
+{
+	if [ "${GIT_AUDIT_REPORT_DEBUG}" -gt "1" ]; then
+		dirname $0
+	else
+		echo "/usr/bin"
+	fi
+}
+
+git_list_audit_commits()
+{
+	git rev-list --no-merges "$@"
+}
+
+git_diff_ranges()
+{
+	`bin_path`/git-audit-ranges "$@"
+}
+
+diff_ranges_for_blame()
+{
+	awk '
+		/^commit / {next}
+		/^a / {
+			sub(/^a /, "")
+			a = $0
+			next
+		}
+		/^b / {
+			sub(/^b /, "")
+			b = $0
+			next
+		}
+		/^[0-9]/ {
+			start = int($1)
+			end = int($1) + int($2) - 1
+			print a "\t" start "\t" end
+			next
+		}
+	'
+}
+
+blame_to_xml()
+{
+	`script_path`/git-xml-blame.awk -v file="${1}"
+}
+
+gen_audit_blame_xml()
+{
+	id="$1"
+	start="$2"
+
+	git_diff_ranges ${id} | diff_ranges_for_blame ${start} \
+	| (while read blame; do
+		file=`cut -f1 <<< "${blame}"`
+		beg=`cut -f2 <<< "${blame}"`
+		end=`cut -f3 <<< "${blame}"`
+
+		git blame ${start} --line-porcelain -L${beg},${end} ${file} \
+		| blame_to_xml "${file}"
+	done)
+}
+
+log_to_xml()
+{
+	`script_path`/git-xml-log.awk
+}
+
+gen_audit_diff_xml()
+{
+	id="$1"
+
+	git log --no-merges -p --date=raw --pretty=fuller -1 ${id} \
+	| log_to_xml
+}
+
+git_audit_related()
+{
+	`bin_path`/git-audit-related "$@"
+}
+
+gen_audit_related_xml()
+{
+	git_audit_related "$@" | awk '
+		/^[0-9a-f]{40}$/ {
+			print "<related>" $0 "</related>"
+		}
+	'
+}
+
+xslt_report()
+{
+	in="$1"
+	out="$2"
+
+	if ! which xsltproc 2>/dev/null >/dev/null; then
+		die "could not find xsltproc"
+	fi
+
+	xsltproc `script_path`/git-audit-report.xsl "${in}" > "${out}"
+}
+
+if [ -z "$1" ]; then
+	die "missing argument <start-of-audit>"
+fi
+
+start=`git rev-parse "$1"`
+
+if [ -z "$2" ]; then
+	end=`git rev-parse HEAD`
+else
+	end=`git rev-parse "$2"`
+fi
+
+debug "audited branch: ${start}"
+debug "auditing branch: ${end}"
+
+echo "<audit of=\"${start}\">" > report.xml
+
+for id in `git_list_audit_commits ^${start} ${end}`; do
+	debug "process ${id}"
+	echo "<record id=\"${id}\">" >> report.xml
+	gen_audit_blame_xml "${id}" "${start}" >> report.xml
+	gen_audit_diff_xml "${id}" >> report.xml
+	gen_audit_related_xml "${start}" "${id}" >> report.xml
+	echo "</record>" >> report.xml
+done
+
+echo "</audit>" >> report.xml
+
+xslt_report report.xml report.html
