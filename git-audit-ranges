@@ -1,0 +1,27 @@
+#! /bin/sh
+
+debug()
+{
+	echo "$@" >&2
+}
+
+while [ -n "$1" ]; do
+	id=`git rev-parse $1`
+	
+	echo "commit ${id}"
+	git diff ${id}~..${id} \
+	| awk '
+		/^--- / || /^\+\+\+ / {
+			sub(/^... /, "")
+			sub(/\//, " ")
+			print
+			next
+		}
+		/^@@/ {
+			gsub(/,/, " ")
+			print substr($2, 2), $3, substr($4, 2), $5
+			next
+		}
+	'
+	shift
+done
