@@ -1,0 +1,129 @@
+#! /bin/sh
+
+audit_format()
+{
+	awk -v colory="${GIT_AUDIT_COLOR}" '
+		function raw_color(line, code, nl)
+		{
+			if (colory)
+				printf "%c[%sm%s%c[m%s", 27, code, line, 27, nl
+			else
+				printf "%s%s", line, nl
+		}
+
+		function color(line, code)
+		{
+			raw_color(line, code, "\n")
+		}
+
+		function color_inline(line, code)
+		{
+			raw_color(line, code, "")
+		}
+
+		BEGIN {
+			mode = "begin"
+		}
+		/^commit / {
+			if (mode != "begin")
+				print ""
+			color($0, "33")
+			mode = "commit"
+			next
+		}
+		mode == "commit" && /^diff --git / {
+			mode = "diff"
+			next
+		}
+		mode == "commit" && /^    style:/ {
+			sub(/^    style:/, "")
+			color_inline("    style:", "1;37")
+			print $0
+			next
+		}
+		mode == "commit" && /^    low:/ {
+			sub(/^    low:/, "")
+			color_inline("    low:", "1;35")
+			print $0
+			next
+		}
+		mode == "commit" && /^    moderate:/ {
+			sub(/^    moderate:/, "")
+			color_inline("    moderate:", "1;36")
+			print $0
+			next
+		}
+		mode == "commit" && /^    high:/ {
+			sub(/^    high:/, "")
+			color_inline("    high:", "1;31")
+			print $0
+			next
+		}
+		mode == "commit" {
+			print
+			next
+		}
+		mode == "diff" && /^--- / {
+			sub(/^--- /, "")
+			color("audit " $0, "1")
+			next
+		}
+		mode == "diff" && /^@@ / {
+			split($2, src, ",")
+			split($3, dst, ",")
+
+			if (substr(src[1], 2) != substr(dst[1], 2) || src[2] != dst[2]) {
+				color("## suggested changes", "1;37")
+				print
+				mode = "copy"
+				next
+			}
+
+			color($2, "36")
+			next
+		}
+		mode == "diff" && /^ / {
+			print
+			next
+		}
+		mode == "diff" && /^\+ / {
+			sub(/^\+/, "|")
+			color($0, "1;33")
+			next
+		}
+		mode == "copy" && /^\+ / {
+			color($0, "32")
+			next
+		}
+		mode == "copy" && /^\- / {
+			color($0, "31")
+			next
+		}
+		mode == "copy" {
+			print
+			next
+		}
+		mode == "skip" {
+			next
+		}
+	'
+}
+
+pager()
+{
+	${GIT_AUDIT_PAGER}
+}
+
+default_pager()
+{
+	if [ "${GIT_AUDIT_COLOR}" = "0" ]; then
+		echo "less"
+	else
+		echo "less -R"
+	fi
+}
+
+test -z "${GIT_AUDIT_COLOR}" && GIT_AUDIT_COLOR=1
+test -z "${GIT_AUDIT_PAGER}" && GIT_AUDIT_PAGER=`default_pager`
+
+git --no-pager log -p "$@" | audit_format | pager
