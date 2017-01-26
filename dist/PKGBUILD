@@ -1,0 +1,36 @@
+# Maintainer: Jan Viktorin <viktorin@rehivetech.com>
+pkgname=git-audit-git
+pkgver=master
+pkgrel=1
+pkgdesc="Helping tools for manual auditing of source code"
+arch=('x86_64' 'i686')
+url="https://github.com/jviki/git-audit"
+license=('GPL')
+groups=()
+depends=('git' 'gawk' 'libxslt')
+makedepends=('git')
+provides=("${pkgname%-git}")
+conflicts=("${pkgname%-git}")
+replaces=()
+backup=()
+options=()
+install=
+source=(${pkgname%-git}::git+https://github.com/jviki/git-audit)
+noextract=()
+md5sums=('SKIP')
+
+package() {
+	cd "$srcdir/${pkgname%-git}"
+	
+	mkdir -p "${pkgdir}/usr/bin"
+	mkdir -p "${pkgdir}/usr/share/git-audit"
+
+	cp -a git-audit-log "${pkgdir}/usr/bin/git-audit-log"
+	cp -a git-audit-report "${pkgdir}/usr/bin/git-audit-report"
+	cp -a git-audit-ranges "${pkgdir}/usr/bin/git-audit-ranges"
+	cp -a git-audit-related "${pkgdir}/usr/bin/git-audit-related"
+
+	cp -a git-xml-log.awk "${pkgdir}/usr/share/git-audit/git-xml-log.awk"
+	cp -a git-xml-blame.awk "${pkgdir}/usr/share/git-audit/git-xml-blame.awk"
+	cp -a git-audit-report.xsl "${pkgdir}/usr/share/git-audit/git-audit-report.xsl"
+}
